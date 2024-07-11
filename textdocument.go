@@ -121,18 +121,18 @@ func (doc *TextDocument) SetTextCtx(text string, ctx *context.Context) error {
 	return doc.UpdateTree(ctx)
 }
 
-func (doc *TextDocument) SetParser(parser *sitter.Parser) {
-	doc.SetParserCtx(parser, nil)
+func (doc *TextDocument) SetParser(parser *sitter.Parser) error {
+	return doc.SetParserCtx(parser, nil)
 }
 
-func (doc *TextDocument) SetParserCtx(parser *sitter.Parser, ctx *context.Context) {
+func (doc *TextDocument) SetParserCtx(parser *sitter.Parser, ctx *context.Context) error {
 	doc.Parser = parser
 
 	if doc.Tree != nil {
-		return
+		return nil
 	}
 
-	doc.UpdateTree(ctx)
+	return doc.UpdateTree(ctx)
 }
 
 func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
