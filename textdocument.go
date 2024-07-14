@@ -22,18 +22,32 @@ func NewTextDocument(text string) *TextDocument {
 
 type TextDocument struct {
 	Text   string
-	Lines  []uint
+	Lines  []UInt
 	Tree   *sitter.Tree
 	Parser *sitter.Parser
+
+	lastLineOffset lineOffsetColumn
 }
 
-type uint = proto.UInteger
+type lineOffsetColumn struct {
+	line   UInt
+	offset UInt
+	column UInt
+}
 
-func (doc *TextDocument) Change(e *proto.TextDocumentContentChangeEvent) error {
+type (
+	UInt        = proto.UInteger
+	ChangeEvent = proto.TextDocumentContentChangeEvent
+	Position    = proto.Position
+	Range       = proto.Range
+	Point       = sitter.Point
+)
+
+func (doc *TextDocument) Change(e *ChangeEvent) error {
 	return doc.ChangeCtx(e, nil)
 }
 
-func (doc *TextDocument) ChangeCtx(e *proto.TextDocumentContentChangeEvent, ctx *context.Context) error {
+func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 	start, err := doc.PositionToByteIndex(&e.Range.Start)
 
 	if err != nil {
@@ -52,7 +66,7 @@ func (doc *TextDocument) ChangeCtx(e *proto.TextDocumentContentChangeEvent, ctx 
 		return nil
 	}
 
-	endIndex := start + uint(len(e.Text))
+	endIndex := start + UInt(len(e.Text))
 	endPos, err := doc.ByteIndexToPosition(endIndex)
 
 	if err != nil {
@@ -75,21 +89,21 @@ func (doc *TextDocument) ChangeCtx(e *proto.TextDocumentContentChangeEvent, ctx 
 	return doc.UpdateTree(ctx)
 }
 
-func NewRange(startLine uint, startChar uint, endLine uint, endChar uint) *proto.Range {
-	return &proto.Range{
-		Start: proto.Position{
+func NewRange(startLine UInt, startChar UInt, endLine UInt, endChar UInt) *Range {
+	return &Range{
+		Start: Position{
 			Line:      startLine,
 			Character: startChar,
 		},
-		End: proto.Position{
+		End: Position{
 			Line:      endLine,
 			Character: endChar,
 		},
 	}
 }
 
-func PositionToPoint(pos *proto.Position) sitter.Point {
-	return sitter.Point{
+func PositionToPoint(pos *Position) Point {
+	return Point{
 		Row:    pos.Line,
 		Column: pos.Character,
 	}
@@ -97,12 +111,13 @@ func PositionToPoint(pos *proto.Position) sitter.Point {
 
 func (doc *TextDocument) UpdateLines() {
 	lines := strings.Split(doc.Text, "\n")
-	doc.Lines = make([]uint, len(lines))
-	offset := uint(0)
+	doc.Lines = make([]UInt, len(lines))
+	doc.lastLineOffset = lineOffsetColumn{}
+	offset := UInt(0)
 
 	for i, line := range lines {
 		doc.Lines[i] = offset
-		offset += 1 + uint(len(line))
+		offset += 1 + UInt(len(line))
 	}
 }
 
@@ -154,8 +169,8 @@ func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
 	return nil
 }
 
-func (doc *TextDocument) PositionToByteIndex(pos *proto.Position) (uint, error) {
-	linesCount := uint(len(doc.Lines))
+func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
+	linesCount := UInt(len(doc.Lines))
 
 	if pos.Line >= linesCount {
 		return 0, errors.New("out of range")
@@ -163,35 +178,51 @@ func (doc *TextDocument) PositionToByteIndex(pos *proto.Position) (uint, error) 
 
 	offset := doc.Lines[pos.Line]
 
-	for i := uint(0); i < pos.Character; i++ {
+	for i := UInt(0); i < pos.Character; i++ {
 		char, size := utf8.DecodeRuneInString(doc.Text[offset:])
 
 		if char == utf8.RuneError {
 			return 0, errors.New("rune error")
 		}
 
-		offset += uint(size)
+		offset += UInt(size)
 	}
 
 	return offset, nil
 }
 
-func (doc *TextDocument) ByteIndexToPosition(index uint) (*proto.Position, error) {
-	if index >= uint(len(doc.Text)) {
+// byte index means number of bytes from text start
+func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
+	if index >= UInt(len(doc.Text)) {
 		return nil, errors.New("out of range")
 	}
 
-	count := uint(len(doc.Lines) - 1)
-	line := count
+	line := UInt(len(doc.Lines) - 1)
 
-	for ; line >= 0; line-- {
-		if doc.Lines[line] <= index {
+	for {
+		if line == 0 || doc.Lines[line] <= index {
 			break
 		}
+
+		line--
 	}
 
-	column := uint(0)
 	offset := doc.Lines[line]
+
+	return doc.LineByteIndexToPosition(line, index-offset)
+}
+
+// index is number of bytes from line start
+func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Position, error) {
+	column := UInt(0)
+	offset := doc.Lines[line]
+	index += offset
+	last := &doc.lastLineOffset
+
+	if last.line == line && last.offset <= index {
+		offset = last.offset
+		column = last.column
+	}
 
 	for {
 		if offset >= index {
@@ -204,12 +235,21 @@ func (doc *TextDocument) ByteIndexToPosition(index uint) (*proto.Position, error
 			return nil, errors.New("rune error")
 		}
 
-		offset += uint(size)
+		offset += UInt(size)
 		column++
 	}
 
-	return &proto.Position{
+	last.line = line
+	last.offset = offset
+	last.column = column
+
+	return &Position{
 		Line:      line,
 		Character: column,
 	}, nil
+
+}
+
+func (doc *TextDocument) PointToPosition(point Point) (*Position, error) {
+	return doc.LineByteIndexToPosition(point.Row, point.Column)
 }

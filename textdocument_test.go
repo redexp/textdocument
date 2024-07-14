@@ -8,7 +8,7 @@ import (
 )
 
 func getDoc() *textdocument.TextDocument {
-	return textdocument.NewTextDocument("⌘sd\nqwer\n⌘xc")
+	return textdocument.NewTextDocument("⌘sd\nqwer\n⌘xc") // 5 n 4 n 5 = 16
 }
 
 func TestUpdateLines(t *testing.T) {
@@ -111,7 +111,9 @@ func TestByteIndexToPosition(t *testing.T) {
 	list := [][]uint32{
 		{0, 0, 0},
 		{3, 0, 1},
+		{4, 0, 2},
 		{7, 1, 1},
+		{15, 2, 2},
 	}
 
 	for i, item := range list {
