@@ -51,6 +51,16 @@ func TestChange(t *testing.T) {
 			Range: textdocument.NewRange(0, 0, 2, 3),
 			Check: "TEST",
 		},
+		{
+			Range: textdocument.NewRange(3, 0, 3, 0),
+			Text:  "\n",
+			Check: "⌘sd\nqwer\n⌘xc\n",
+		},
+		{
+			Range: textdocument.NewRange(3, 0, 3, 0),
+			Text:  "\nTest",
+			Check: "⌘sd\nqwer\n⌘xc\nTest",
+		},
 	}
 
 	reset := doc.Text

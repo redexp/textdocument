@@ -3,6 +3,7 @@ package textdocument
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -21,10 +22,11 @@ func NewTextDocument(text string) *TextDocument {
 }
 
 type TextDocument struct {
-	Text   string
-	Lines  []UInt
-	Tree   *sitter.Tree
-	Parser *sitter.Parser
+	Text       string
+	TextLength UInt
+	Lines      []UInt
+	Tree       *sitter.Tree
+	Parser     *sitter.Parser
 
 	lastLineOffset lineOffsetColumn
 }
@@ -112,6 +114,7 @@ func PositionToPoint(pos *Position) Point {
 func (doc *TextDocument) UpdateLines() {
 	lines := strings.Split(doc.Text, "\n")
 	doc.Lines = make([]UInt, len(lines))
+	doc.TextLength = UInt(len(doc.Text))
 	doc.lastLineOffset = lineOffsetColumn{}
 	offset := UInt(0)
 
@@ -172,8 +175,12 @@ func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
 func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 	linesCount := UInt(len(doc.Lines))
 
-	if pos.Line >= linesCount {
-		return 0, errors.New("out of range")
+	if pos.Line == linesCount && pos.Character == 0 {
+		return doc.TextLength, nil
+	}
+
+	if pos.Line > linesCount {
+		return 0, fmt.Errorf("line %d is out of range (%d)", pos.Line, linesCount-1)
 	}
 
 	offset := doc.Lines[pos.Line]
@@ -193,8 +200,8 @@ func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 
 // byte index means number of bytes from text start
 func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
-	if index >= UInt(len(doc.Text)) {
-		return nil, errors.New("out of range")
+	if index >= doc.TextLength {
+		return nil, fmt.Errorf("byte index %d is out of range (%d)", index, doc.TextLength)
 	}
 
 	line := UInt(len(doc.Lines) - 1)
