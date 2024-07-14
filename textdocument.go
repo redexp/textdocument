@@ -200,7 +200,7 @@ func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 
 // byte index means number of bytes from text start
 func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
-	if index >= doc.TextLength {
+	if index > doc.TextLength {
 		return nil, fmt.Errorf("byte index %d is out of range (%d)", index, doc.TextLength)
 	}
 

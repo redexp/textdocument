@@ -124,9 +124,15 @@ func TestByteIndexToPosition(t *testing.T) {
 		{4, 0, 2},
 		{7, 1, 1},
 		{15, 2, 2},
+		{16, 2, 3},
+		{17, 3, 0},
 	}
 
 	for i, item := range list {
+		if i == 6 {
+			doc.SetText(doc.Text + "\n")
+		}
+
 		pos, err := doc.ByteIndexToPosition(item[0])
 
 		if err != nil {
