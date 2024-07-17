@@ -48,18 +48,16 @@ func TestChange(t *testing.T) {
 			Check: "⌘sd\nqTESTwer\n⌘xc",
 		},
 		{
+			Range: textdocument.NewRange(0, 0, 1, 0),
+			Check: "TESTqwer\n⌘xc",
+		},
+		{
 			Range: textdocument.NewRange(0, 0, 2, 3),
 			Check: "TEST",
 		},
 		{
-			Range: textdocument.NewRange(3, 0, 3, 0),
-			Text:  "\n",
-			Check: "⌘sd\nqwer\n⌘xc\n",
-		},
-		{
-			Range: textdocument.NewRange(3, 0, 3, 0),
-			Text:  "\nTest",
-			Check: "⌘sd\nqwer\n⌘xc\nTest",
+			Range: textdocument.NewRange(2, 3, 2, 3),
+			Check: "⌘sd\nqwer\n⌘xcTEST",
 		},
 	}
 
@@ -93,10 +91,16 @@ func TestPositionToByteIndex(t *testing.T) {
 	doc := getDoc()
 
 	list := [][]uint32{
-		{0, 0, 0},
-		{0, 2, 4},
-		{1, 0, 6},
-		{1, 2, 8},
+		{0, 0, 0, 0},
+		{0, 2, 4, 0},
+		{0, 4, 6, 1},
+		{1, 0, 6, 0},
+		{1, 2, 8, 0},
+		{1, 5, 11, 1},
+		{2, 0, 11, 0},
+		{2, 3, 16, 0},
+		{2, 4, 17, 1},
+		{3, 0, 0, 1},
 	}
 
 	for i, item := range list {
@@ -104,6 +108,13 @@ func TestPositionToByteIndex(t *testing.T) {
 			Line:      item[0],
 			Character: item[1],
 		})
+
+		if item[3] == 1 {
+			if err == nil {
+				t.Errorf("%d should return error", i)
+			}
+			continue
+		}
 
 		if err != nil {
 			t.Errorf("PositionToByteIndex err: %s", err.Error())
@@ -141,6 +152,38 @@ func TestByteIndexToPosition(t *testing.T) {
 
 		if pos.Line != item[1] || pos.Character != item[2] {
 			t.Errorf("%d pos (%d, %d) expected (%d, %d)", i, pos.Line, pos.Character, item[1], item[2])
+		}
+	}
+}
+
+func TestPointToPosition(t *testing.T) {
+	doc := getDoc()
+
+	list := [][]uint32{
+		{0, 0, 0, 0},
+		{0, 3, 0, 1},
+		{1, 0, 1, 0},
+		{1, 2, 1, 2},
+		{2, 0, 2, 0},
+		{2, 4, 2, 2},
+	}
+
+	for i, item := range list {
+		pos, err := doc.PointToPosition(textdocument.Point{
+			Row:    item[0],
+			Column: item[1],
+		})
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+		}
+
+		if pos.Line != item[2] {
+			t.Errorf("%d pos.Line %d expect %d", i, pos.Line, item[2])
+		}
+
+		if pos.Character != item[3] {
+			t.Errorf("%d pos.Character %d expect %d", i, pos.Character, item[3])
 		}
 	}
 }

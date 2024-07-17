@@ -62,14 +62,30 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 		return err
 	}
 
-	doc.SetText(doc.Text[:start] + e.Text + doc.Text[end:])
+	startPoint, err := doc.PositionToPoint(&e.Range.Start)
+
+	if err != nil {
+		return err
+	}
+
+	oldEndPoint, err := doc.PositionToPoint(&e.Range.End)
+
+	if err != nil {
+		return err
+	}
+
+	err = doc.SetText(doc.Text[:start] + e.Text + doc.Text[end:])
+
+	if err != nil {
+		return err
+	}
 
 	if doc.Tree == nil {
 		return nil
 	}
 
-	endIndex := start + UInt(len(e.Text))
-	endPos, err := doc.ByteIndexToPosition(endIndex)
+	newEndIndex := start + UInt(len(e.Text))
+	newEndPoint, err := doc.ByteIndexToPoint(newEndIndex)
 
 	if err != nil {
 		return err
@@ -78,10 +94,10 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 	doc.Tree.Edit(sitter.EditInput{
 		StartIndex:  start,
 		OldEndIndex: end,
-		NewEndIndex: endIndex,
-		StartPoint:  PositionToPoint(&e.Range.Start),
-		OldEndPoint: PositionToPoint(&e.Range.End),
-		NewEndPoint: PositionToPoint(endPos),
+		NewEndIndex: newEndIndex,
+		StartPoint:  *startPoint,
+		OldEndPoint: *oldEndPoint,
+		NewEndPoint: *newEndPoint,
 	})
 
 	if doc.Parser == nil {
@@ -101,13 +117,6 @@ func NewRange(startLine UInt, startChar UInt, endLine UInt, endChar UInt) *Range
 			Line:      endLine,
 			Character: endChar,
 		},
-	}
-}
-
-func PositionToPoint(pos *Position) Point {
-	return Point{
-		Row:    pos.Line,
-		Column: pos.Character,
 	}
 }
 
@@ -175,17 +184,19 @@ func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
 func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 	linesCount := UInt(len(doc.Lines))
 
-	if pos.Line == linesCount && pos.Character == 0 {
-		return doc.TextLength, nil
-	}
-
-	if pos.Line > linesCount {
+	if pos.Line >= linesCount {
 		return 0, fmt.Errorf("line %d is out of range (%d)", pos.Line, linesCount-1)
 	}
 
+	character := UInt(0)
 	offset := doc.Lines[pos.Line]
+	max := doc.TextLength
 
-	for i := UInt(0); i < pos.Character; i++ {
+	if pos.Line+1 < linesCount {
+		max = doc.Lines[pos.Line+1] - 1
+	}
+
+	for character < pos.Character {
 		char, size := utf8.DecodeRuneInString(doc.Text[offset:])
 
 		if char == utf8.RuneError {
@@ -193,15 +204,19 @@ func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 		}
 
 		offset += UInt(size)
+		character++
+
+		if offset > max || (offset == max && character < pos.Character) {
+			return 0, fmt.Errorf("character %d is out of reange (%d) for line %d", pos.Character, character, pos.Line)
+		}
 	}
 
 	return offset, nil
 }
 
-// byte index means number of bytes from text start
-func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
+func (doc *TextDocument) ByteIndexLine(index UInt) (UInt, error) {
 	if index > doc.TextLength {
-		return nil, fmt.Errorf("byte index %d is out of range (%d)", index, doc.TextLength)
+		return 0, fmt.Errorf("byte index %d is out of range (%d)", index, doc.TextLength)
 	}
 
 	line := UInt(len(doc.Lines) - 1)
@@ -214,13 +229,43 @@ func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
 		line--
 	}
 
+	return line, nil
+}
+
+// byte index means number of bytes from text start
+func (doc *TextDocument) ByteIndexToPosition(index UInt) (*Position, error) {
+	line, err := doc.ByteIndexLine(index)
+
+	if err != nil {
+		return nil, err
+	}
+
 	offset := doc.Lines[line]
 
 	return doc.LineByteIndexToPosition(line, index-offset)
 }
 
+func (doc *TextDocument) ByteIndexToPoint(index UInt) (*Point, error) {
+	line, err := doc.ByteIndexLine(index)
+
+	if err != nil {
+		return nil, err
+	}
+
+	offset := doc.Lines[line]
+
+	return &Point{
+		Row:    line,
+		Column: index - offset,
+	}, nil
+}
+
 // index is number of bytes from line start
 func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Position, error) {
+	if line >= UInt(len(doc.Lines)) {
+		return nil, fmt.Errorf("line %d is out of range (%d)", line, len(doc.Lines))
+	}
+
 	column := UInt(0)
 	offset := doc.Lines[line]
 	index += offset
@@ -254,9 +299,23 @@ func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Positi
 		Line:      line,
 		Character: column,
 	}, nil
-
 }
 
 func (doc *TextDocument) PointToPosition(point Point) (*Position, error) {
 	return doc.LineByteIndexToPosition(point.Row, point.Column)
+}
+
+func (doc *TextDocument) PositionToPoint(pos *Position) (*Point, error) {
+	index, err := doc.PositionToByteIndex(pos)
+
+	if err != nil {
+		return nil, err
+	}
+
+	offset := doc.Lines[pos.Line]
+
+	return &Point{
+		Row:    pos.Line,
+		Column: index - offset,
+	}, nil
 }
