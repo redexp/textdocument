@@ -74,14 +74,11 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 		return err
 	}
 
-	err = doc.SetText(doc.Text[:start] + e.Text + doc.Text[end:])
-
-	if err != nil {
-		return err
-	}
+	doc.Text = doc.Text[:start] + e.Text + doc.Text[end:]
+	doc.UpdateLines()
 
 	if doc.Tree == nil {
-		return nil
+		return doc.UpdateTree(ctx)
 	}
 
 	newEndIndex := start + UInt(len(e.Text))
@@ -99,10 +96,6 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 		OldEndPoint: *oldEndPoint,
 		NewEndPoint: *newEndPoint,
 	})
-
-	if doc.Parser == nil {
-		return nil
-	}
 
 	return doc.UpdateTree(ctx)
 }
@@ -133,46 +126,53 @@ func (doc *TextDocument) UpdateLines() {
 	}
 }
 
+// Same as SetTextCtx with ctx = nil
 func (doc *TextDocument) SetText(text string) error {
 	return doc.SetTextCtx(text, nil)
 }
 
+// Set Text, call UpdateLines() and UpdateTree(), be aware of how UpdateTree() will generate new Tree
 func (doc *TextDocument) SetTextCtx(text string, ctx *context.Context) error {
 	doc.Text = text
 	doc.UpdateLines()
 
-	if doc.Parser == nil {
-		return nil
-	}
-
 	return doc.UpdateTree(ctx)
 }
 
+// Same as SetParserCtx() with ctx = nil
 func (doc *TextDocument) SetParser(parser *sitter.Parser) error {
 	return doc.SetParserCtx(parser, nil)
 }
 
+// Will set Parser and call UpdateTree()
 func (doc *TextDocument) SetParserCtx(parser *sitter.Parser, ctx *context.Context) error {
 	doc.Parser = parser
-
-	if doc.Tree != nil {
-		return nil
-	}
 
 	return doc.UpdateTree(ctx)
 }
 
+// Will update Tree. If Tree present and NOT changed then it will be fully regenerated.
+// If Tree has changes then it will be used to generate new Tree
 func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
-	var tree *sitter.Tree
-	var err error
-
-	if ctx != nil {
-		tree, err = doc.Parser.ParseCtx(*ctx, doc.Tree, []byte(doc.Text))
-	} else {
-		tree = doc.Parser.Parse(doc.Tree, []byte(doc.Text))
+	if doc.Parser == nil {
+		return nil
 	}
 
+	oldTree := doc.Tree
+
+	if doc.Tree != nil && !doc.Tree.RootNode().HasChanges() {
+		doc.Tree = nil
+	}
+
+	if ctx == nil {
+		c := context.Background()
+		ctx = &c
+	}
+
+	tree, err := doc.Parser.ParseCtx(*ctx, oldTree, []byte(doc.Text))
+
 	if err != nil {
+		doc.Tree = oldTree
 		return err
 	}
 
@@ -262,13 +262,21 @@ func (doc *TextDocument) ByteIndexToPoint(index UInt) (*Point, error) {
 
 // index is number of bytes from line start
 func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Position, error) {
-	if line >= UInt(len(doc.Lines)) {
+	linesCount := UInt(len(doc.Lines))
+
+	if line >= linesCount {
 		return nil, fmt.Errorf("line %d is out of range (%d)", line, len(doc.Lines))
 	}
 
 	column := UInt(0)
 	offset := doc.Lines[line]
 	index += offset
+	max := doc.TextLength
+
+	if line+1 < linesCount {
+		max = doc.Lines[line+1] - 1
+	}
+
 	last := &doc.lastLineOffset
 
 	if last.line == line && last.offset <= index {
@@ -289,6 +297,10 @@ func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Positi
 
 		offset += UInt(size)
 		column++
+
+		if offset > max {
+			return nil, fmt.Errorf("byte index %d is out of reange (%d) for line %d", index-doc.Lines[line], max-doc.Lines[line], line)
+		}
 	}
 
 	last.line = line

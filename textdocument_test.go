@@ -187,3 +187,42 @@ func TestPointToPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestLineByteIndexToPosition(t *testing.T) {
+	doc := getDoc()
+
+	list := [][]uint32{
+		{0, 0, 0, 0, 0},
+		{0, 3, 0, 1, 0},
+		{0, 4, 0, 2, 0},
+		{0, 5, 0, 3, 0},
+		{1, 0, 1, 0, 0},
+		{1, 2, 1, 2, 0},
+		{1, 5, 0, 0, 1},
+		{2, 3, 2, 1, 0},
+		{2, 4, 2, 2, 0},
+		{2, 5, 2, 3, 0},
+		{0, 6, 0, 0, 1},
+		{2, 6, 0, 0, 1},
+	}
+
+	for i, item := range list {
+		pos, err := doc.LineByteIndexToPosition(item[0], item[1])
+
+		if item[4] == 1 {
+			if err == nil {
+				t.Errorf("%d should be error but it returns %v for {%d, %d}", i, pos, item[0], item[1])
+			}
+			continue
+		}
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		if pos.Line != item[2] || pos.Character != item[3] {
+			t.Errorf("%d wrong pos %v expect {%d, %d}", i, pos, item[2], item[3])
+		}
+	}
+}
