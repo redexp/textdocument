@@ -262,21 +262,14 @@ func (doc *TextDocument) ByteIndexToPoint(index UInt) (*Point, error) {
 
 // index is number of bytes from line start
 func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Position, error) {
-	linesCount := UInt(len(doc.Lines))
+	offset, max, err := doc.LineMinMaxByteIndex(line)
 
-	if line >= linesCount {
-		return nil, fmt.Errorf("line %d is out of range (%d)", line, len(doc.Lines))
+	if err != nil {
+		return nil, err
 	}
 
 	column := UInt(0)
-	offset := doc.Lines[line]
 	index += offset
-	max := doc.TextLength
-
-	if line+1 < linesCount {
-		max = doc.Lines[line+1] - 1
-	}
-
 	last := &doc.lastLineOffset
 
 	if last.line == line && last.offset <= index {
@@ -330,4 +323,76 @@ func (doc *TextDocument) PositionToPoint(pos *Position) (*Point, error) {
 		Row:    pos.Line,
 		Column: index - offset,
 	}, nil
+}
+
+func (doc *TextDocument) LineMinMaxByteIndex(line UInt) (UInt, UInt, error) {
+	linesCount := UInt(len(doc.Lines))
+
+	if line >= linesCount {
+		return 0, 0, fmt.Errorf("line %d is out of range (%d)", line, linesCount)
+	}
+
+	min := doc.Lines[line]
+	max := doc.TextLength
+
+	if line+1 < linesCount {
+		max = doc.Lines[line+1] - 1
+	}
+
+	return min, max, nil
+}
+
+func (doc *TextDocument) GetNonSpaceTextAroundPosition(pos *Position) (string, error) {
+	end, err := doc.PositionToByteIndex(pos)
+
+	if err != nil {
+		return "", err
+	}
+
+	start := end
+	min, max, err := doc.LineMinMaxByteIndex(pos.Line)
+
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		if start <= min {
+			start = min
+			break
+		}
+
+		char, size := utf8.DecodeLastRuneInString(doc.Text[min:start])
+
+		if char == utf8.RuneError {
+			return "", errors.New("rune error")
+		}
+
+		if char == ' ' {
+			break
+		}
+
+		start -= UInt(size)
+	}
+
+	for {
+		if end >= max {
+			end = max
+			break
+		}
+
+		char, size := utf8.DecodeRuneInString(doc.Text[end:max])
+
+		if char == utf8.RuneError {
+			return "", errors.New("rune error")
+		}
+
+		if char == ' ' {
+			break
+		}
+
+		end += UInt(size)
+	}
+
+	return doc.Text[start:end], nil
 }

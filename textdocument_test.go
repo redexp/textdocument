@@ -226,3 +226,72 @@ func TestLineByteIndexToPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestGetNonSpaceTextAroundPosition(t *testing.T) {
+	doc := textdocument.NewTextDocument("asd\nwer zxc")
+
+	type Test struct {
+		Line uint32
+		Char uint32
+		Text string
+	}
+
+	list := []Test{
+		{
+			Line: 0,
+			Char: 0,
+			Text: "asd",
+		},
+		{
+			Line: 0,
+			Char: 1,
+			Text: "asd",
+		},
+		{
+			Line: 1,
+			Char: 0,
+			Text: "wer",
+		},
+		{
+			Line: 1,
+			Char: 1,
+			Text: "wer",
+		},
+		{
+			Line: 1,
+			Char: 3,
+			Text: "wer",
+		},
+		{
+			Line: 1,
+			Char: 4,
+			Text: "zxc",
+		},
+		{
+			Line: 1,
+			Char: 5,
+			Text: "zxc",
+		},
+		{
+			Line: 1,
+			Char: 7,
+			Text: "zxc",
+		},
+	}
+
+	for i, item := range list {
+		text, err := doc.GetNonSpaceTextAroundPosition(&textdocument.Position{
+			Line:      item.Line,
+			Character: item.Char,
+		})
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		if text != item.Text {
+			t.Errorf("%d wrong text '%s' expected '%s'", i, text, item.Text)
+		}
+	}
+}
