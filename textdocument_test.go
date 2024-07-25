@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/redexp/textdocument"
+	sitter "github.com/smacker/go-tree-sitter"
+	js "github.com/smacker/go-tree-sitter/javascript"
 	proto "github.com/tliron/glsp/protocol_3_16"
 )
 
@@ -292,6 +294,107 @@ func TestGetNonSpaceTextAroundPosition(t *testing.T) {
 
 		if text != item.Text {
 			t.Errorf("%d wrong text '%s' expected '%s'", i, text, item.Text)
+		}
+	}
+}
+
+func TestGetNodesByRange(t *testing.T) {
+	text := "var x = 1\nvar y = 2\nvar z = 3"
+	doc := textdocument.NewTextDocument(text)
+
+	p := sitter.NewParser()
+	p.SetLanguage(js.GetLanguage())
+	doc.SetParser(p)
+
+	list := []struct {
+		StartLine uint32
+		StartChar uint32
+		EndLine   uint32
+		EndChar   uint32
+		Values    []string
+	}{
+		{0, 4, 0, 9, []string{"x = 1"}},
+		{0, 1, 0, 5, []string{"var", "x"}},
+		{0, 8, 2, 1, []string{"1", "var y = 2", "var"}},
+		{1, 0, 1, 9, []string{"var y = 2"}},
+		{1, 0, 2, 0, []string{"var y = 2"}},
+	}
+
+	for i, item := range list {
+		start := proto.Position{
+			Line:      item.StartLine,
+			Character: item.StartChar,
+		}
+		end := proto.Position{
+			Line:      item.EndLine,
+			Character: item.EndChar,
+		}
+		nodes, err := doc.GetNodesByRange(&start, &end)
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		values := make([]string, len(nodes))
+
+		for i, node := range nodes {
+			values[i] = node.Content([]byte(text))
+		}
+
+		if len(values) != len(item.Values) {
+			t.Errorf("%d values: %v expect %v", i, values, item.Values)
+			continue
+		}
+
+		for j, value := range item.Values {
+			if values[j] != value {
+				t.Errorf("%d:%d value: '%s' expect '%s'", i, j, values[j], value)
+			}
+		}
+	}
+}
+
+func TestGetNodeByPosition(t *testing.T) {
+	text := "var x = 1\nvar y = 2\nvar z = 3"
+	doc := textdocument.NewTextDocument(text)
+
+	p := sitter.NewParser()
+	p.SetLanguage(js.GetLanguage())
+	doc.SetParser(p)
+
+	list := []struct {
+		StartLine uint32
+		StartChar uint32
+		Value     string
+	}{
+		{0, 4, "x"},
+		{0, 1, "var"},
+		{0, 8, "1"},
+		{1, 0, "var"},
+		{1, 5, ""},
+	}
+
+	for i, item := range list {
+		start := proto.Position{
+			Line:      item.StartLine,
+			Character: item.StartChar,
+		}
+		node, err := doc.GetNodeByPosition(&start)
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		if node == nil && item.Value == "" {
+			continue
+		}
+
+		value := node.Content([]byte(text))
+
+		if item.Value != value {
+			t.Errorf("%d value: '%s' expect '%s'", i, value, item.Value)
 		}
 	}
 }

@@ -396,3 +396,123 @@ func (doc *TextDocument) GetNonSpaceTextAroundPosition(pos *Position) (string, e
 
 	return doc.Text[start:end], nil
 }
+
+func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*sitter.Node, error) {
+	tree := doc.Tree
+	root := tree.RootNode()
+	targets := make([]*sitter.Node, 0)
+
+	startPoint, err := doc.PositionToPoint(start)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if end == nil {
+		end = &Position{
+			Line:      start.Line,
+			Character: start.Character + 1,
+		}
+	}
+
+	endPoint, err := doc.PositionToPoint(end)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if CompareNodeWithRange(root, startPoint, endPoint) == 0 {
+		return append(targets, root), nil
+	}
+
+	c := sitter.NewTreeCursor(root)
+	defer c.Close()
+
+	VisitNode(c, func(node *sitter.Node) int8 {
+		switch CompareNodeWithRange(node, startPoint, endPoint) {
+		case -1:
+			return 1
+
+		case 0:
+			targets = append(targets, node)
+			return 1
+
+		case 1:
+			if node.ChildCount() > 0 {
+				return 0
+			} else {
+				targets = append(targets, node)
+				return 1
+			}
+
+		default:
+			return -1
+		}
+	})
+
+	return targets, nil
+}
+
+func (doc *TextDocument) GetNodeByPosition(pos *Position) (*sitter.Node, error) {
+	nodes, err := doc.GetNodesByRange(pos, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+
+	return nodes[0], nil
+}
+
+// Compare Node with points range
+//
+// -1 - node before range
+// 0 - node inside range
+// 1 - node overlaps range
+// 2 - node after range
+func CompareNodeWithRange(node *sitter.Node, rangeStart *sitter.Point, rangeEnd *sitter.Point) int8 {
+	start := node.StartPoint()
+	end := node.EndPoint()
+
+	if end.Row < rangeStart.Row || (rangeStart.Row == end.Row && end.Column <= rangeStart.Column) {
+		return -1
+	}
+
+	if (rangeStart.Row < start.Row || rangeStart.Row == start.Row && rangeStart.Column <= start.Column) &&
+		(rangeEnd.Row > end.Row || rangeEnd.Row == end.Row && rangeEnd.Column >= end.Column) {
+		return 0
+	}
+
+	if rangeEnd.Row < start.Row || (rangeEnd.Row == start.Row && rangeEnd.Column <= start.Column) {
+		return 2
+	}
+
+	return 1
+}
+
+// Walk through Tree
+// compare function should return: -1 to stop walking, 0 for go inside, 1 to go to next sibling
+func VisitNode(cursor *sitter.TreeCursor, compare func(*sitter.Node) int8) {
+	for {
+		node := cursor.CurrentNode()
+		action := compare(node)
+
+		if action < 0 {
+			return
+		}
+
+		if action == 0 {
+			if cursor.GoToFirstChild() {
+				VisitNode(cursor, compare)
+				cursor.GoToParent()
+			}
+		}
+
+		if !cursor.GoToNextSibling() {
+			break
+		}
+	}
+}
