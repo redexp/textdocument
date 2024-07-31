@@ -13,6 +13,16 @@ func getDoc() *textdocument.TextDocument {
 	return textdocument.NewTextDocument("⌘sd\nqwer\n⌘xc") // 5 n 4 n 5 = 16
 }
 
+func createParser() *sitter.Parser {
+	p := sitter.NewParser()
+	p.SetLanguage(getLang())
+	return p
+}
+
+func getLang() *sitter.Language {
+	return js.GetLanguage()
+}
+
 func TestUpdateLines(t *testing.T) {
 	doc := getDoc()
 
@@ -301,10 +311,7 @@ func TestGetNonSpaceTextAroundPosition(t *testing.T) {
 func TestGetNodesByRange(t *testing.T) {
 	text := "var x = 1\nvar y = 2\nvar z = 3"
 	doc := textdocument.NewTextDocument(text)
-
-	p := sitter.NewParser()
-	p.SetLanguage(js.GetLanguage())
-	doc.SetParser(p)
+	doc.SetParser(createParser())
 
 	list := []struct {
 		StartLine uint32
@@ -318,6 +325,7 @@ func TestGetNodesByRange(t *testing.T) {
 		{0, 8, 2, 1, []string{"1", "var y = 2", "var"}},
 		{1, 0, 1, 9, []string{"var y = 2"}},
 		{1, 0, 2, 0, []string{"var y = 2"}},
+		{2, 8, 2, 9, []string{"3"}},
 	}
 
 	for i, item := range list {
@@ -356,12 +364,9 @@ func TestGetNodesByRange(t *testing.T) {
 }
 
 func TestGetNodeByPosition(t *testing.T) {
-	text := "var x = 1\nvar y = 2\nvar z = 3"
+	text := "var x = 1\nvar y =  2\nvar z = 3"
 	doc := textdocument.NewTextDocument(text)
-
-	p := sitter.NewParser()
-	p.SetLanguage(js.GetLanguage())
-	doc.SetParser(p)
+	doc.SetParser(createParser())
 
 	list := []struct {
 		StartLine uint32
@@ -372,7 +377,9 @@ func TestGetNodeByPosition(t *testing.T) {
 		{0, 1, "var"},
 		{0, 8, "1"},
 		{1, 0, "var"},
-		{1, 5, ""},
+		{1, 5, "y"},
+		{1, 8, ""},
+		{2, 9, "3"},
 	}
 
 	for i, item := range list {
@@ -387,7 +394,12 @@ func TestGetNodeByPosition(t *testing.T) {
 			continue
 		}
 
-		if node == nil && item.Value == "" {
+		if node == nil {
+			if item.Value == "" {
+				continue
+			}
+
+			t.Errorf("%d node nil, pos: %v", i, item)
 			continue
 		}
 
@@ -395,6 +407,179 @@ func TestGetNodeByPosition(t *testing.T) {
 
 		if item.Value != value {
 			t.Errorf("%d value: '%s' expect '%s'", i, value, item.Value)
+		}
+	}
+}
+
+func TestHighlights(t *testing.T) {
+	doc := textdocument.NewTextDocument("var x = 1\nvar y = 2\nvar zxc = 3")
+	doc.SetParser(createParser())
+
+	pattern := "(identifier) @ident\n(number) @num"
+	q, _ := sitter.NewQuery([]byte(pattern), getLang())
+	doc.SetHighlightQuery(q)
+
+	if len(doc.HighlightCaptures) != 6 {
+		t.Errorf("init HighlightCaptures wrong len %d expect %d", len(doc.HighlightCaptures), 6)
+	}
+
+	capTests := []struct {
+		Line  uint32
+		Char  uint32
+		Index uint32
+		Value string
+	}{
+		{0, 8, 1, "1"},
+		{1, 4, 0, "y"},
+		{2, 11, 1, "3"},
+	}
+
+	for i, item := range capTests {
+		cap, err := doc.GetHighlightCaptureByPosition(&textdocument.Position{
+			Line:      item.Line,
+			Character: item.Char,
+		})
+
+		if err != nil {
+			t.Errorf("%d err %s", i, err)
+			continue
+		}
+
+		if cap.Index != item.Index {
+			t.Errorf("%d cap wrong Index %d expect %d", i, cap.Index, item.Index)
+		}
+
+		str := cap.Node.Content([]byte(doc.Text))
+
+		if str != item.Value {
+			t.Errorf("%d cap.Node.Content '%s' expect '%s'", i, str, item.Value)
+		}
+	}
+
+	closestTests := []struct {
+		Line   uint32
+		Char   uint32
+		Prev   string
+		Target string
+		Next   string
+	}{
+		{0, 0, "", "", "x"},
+		{0, 4, "", "x", "1"},
+		{0, 5, "", "x", "1"},
+		{0, 6, "x", "", "1"},
+		{0, 8, "x", "1", "y"},
+		{0, 9, "x", "1", "y"},
+		{1, 0, "1", "", "y"},
+		{2, 11, "zxc", "3", ""},
+	}
+
+	for i, item := range closestTests {
+		prev, target, next, err := doc.GetClosestHighlightCaptureByPosition(&textdocument.Position{
+			Line:      item.Line,
+			Character: item.Char,
+		})
+
+		if err != nil {
+			t.Errorf("%d err %s", i, err)
+			continue
+		}
+
+		caps := []*sitter.QueryCapture{prev, target, next}
+		values := []string{item.Prev, item.Target, item.Next}
+
+		for n, cap := range caps {
+			if cap == nil {
+				if values[n] != "" {
+					t.Errorf("%d cap %d is nil expect '%s'", i, n, values[n])
+					break
+				}
+
+				continue
+			}
+
+			value := cap.Node.Content([]byte(doc.Text))
+
+			if value != values[n] {
+				t.Errorf("%d cap %d is '%s' expect '%s'", i, n, value, values[n])
+				break
+			}
+		}
+	}
+
+	list := []struct {
+		Pos  []uint32
+		Text string
+	}{
+		{[]uint32{0, 4, 0, 5}, "z"},
+		{[]uint32{1, 8, 1, 9}, "4"},
+		{[]uint32{2, 5, 2, 11}, "cx = 5"},
+		{[]uint32{0, 7, 0, 7}, "  "},
+		{[]uint32{2, 4, 2, 5}, ""},
+	}
+
+	for i, item := range list {
+		start := &proto.Position{
+			Line:      item.Pos[0],
+			Character: item.Pos[1],
+		}
+		end := &proto.Position{
+			Line:      item.Pos[2],
+			Character: item.Pos[3],
+		}
+
+		err := doc.Change(&textdocument.ChangeEvent{
+			Range: &proto.Range{
+				Start: *start,
+				End:   *end,
+			},
+			Text: item.Text,
+		})
+
+		if err != nil {
+			t.Errorf("%d err %s", i, err)
+		}
+	}
+
+	legend := textdocument.HighlightLegend{
+		{
+			Type:      0,
+			Modifiers: 0,
+		},
+		{
+			Type:      1,
+			Modifiers: 1,
+		},
+	}
+
+	tags, err := doc.ConvertHighlightCaptures(legend)
+
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	comp := []uint32{
+		0, 4, 1, 0, 0,
+		0, 6, 1, 1, 1,
+		1, 4, 1, 0, 0,
+		0, 4, 1, 1, 1,
+		1, 4, 2, 0, 0,
+		0, 5, 1, 1, 1,
+	}
+
+	count := len(comp)
+
+	if len(tags) != count {
+		t.Errorf("tags len %d expected %d", len(tags), count)
+		return
+	}
+
+	for i := 0; i < count; i += 5 {
+		for n := 0; n < 5; n++ {
+			if tags[i+n] != comp[i+n] {
+				t.Errorf("%d wrong tag %v expected %v\n", i/5, tags[i:i+5], comp[i:i+5])
+				return
+			}
 		}
 	}
 }

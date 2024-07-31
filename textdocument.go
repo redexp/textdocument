@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -22,13 +23,34 @@ func NewTextDocument(text string) *TextDocument {
 }
 
 type TextDocument struct {
-	Text       string
-	TextLength UInt
-	Lines      []UInt
-	Tree       *sitter.Tree
-	Parser     *sitter.Parser
+	Text              string
+	TextLength        UInt
+	Lines             []UInt
+	Tree              *sitter.Tree
+	Parser            *sitter.Parser
+	HighlightQuery    *sitter.Query
+	HighlightCaptures []*sitter.QueryCapture
 
 	lastLineOffset lineOffsetColumn
+}
+
+type HighlightEdit struct {
+	Start  UInt
+	Delete UInt
+	Insert []*sitter.QueryCapture
+}
+
+type HighlightLegend = []TokenType
+
+type TokenType struct {
+	Type      UInt
+	Modifiers UInt
+}
+
+type Token struct {
+	Position
+	TokenType
+	Length UInt
 }
 
 type lineOffsetColumn struct {
@@ -43,6 +65,7 @@ type (
 	Position    = proto.Position
 	Range       = proto.Range
 	Point       = sitter.Point
+	Node        = sitter.Node
 )
 
 func (doc *TextDocument) Change(e *ChangeEvent) error {
@@ -97,7 +120,15 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 		NewEndPoint: *newEndPoint,
 	})
 
-	return doc.UpdateTree(ctx)
+	err = doc.UpdateTree(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	doc.UpdateHighlightCaptures()
+
+	return nil
 }
 
 func NewRange(startLine UInt, startChar UInt, endLine UInt, endChar UInt) *Range {
@@ -151,6 +182,11 @@ func (doc *TextDocument) SetParserCtx(parser *sitter.Parser, ctx *context.Contex
 	return doc.UpdateTree(ctx)
 }
 
+func (doc *TextDocument) SetHighlightQuery(query *sitter.Query) {
+	doc.HighlightQuery = query
+	doc.UpdateHighlightCaptures()
+}
+
 // Will update Tree. If Tree present and NOT changed then it will be fully regenerated.
 // If Tree has changes then it will be used to generate new Tree
 func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
@@ -176,9 +212,95 @@ func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
 		return err
 	}
 
+	if oldTree != nil {
+		oldTree.Close()
+	}
+
 	doc.Tree = tree
 
 	return nil
+}
+
+func (doc *TextDocument) UpdateHighlightCaptures() {
+	if doc.Tree == nil || doc.HighlightQuery == nil {
+		return
+	}
+
+	doc.HighlightCaptures = doc.GetHighlightCapturesInNode(doc.Tree.RootNode())
+}
+
+func (doc *TextDocument) GetHighlightCapturesByRange(start *Point, end *Point) []*sitter.QueryCapture {
+	list := make([]*sitter.QueryCapture, 0)
+
+	for _, cap := range doc.HighlightCaptures {
+		if NodeOverlapsRange(cap.Node, start, end) {
+			list = append(list, cap)
+		}
+	}
+
+	return list
+}
+
+func (doc *TextDocument) GetHighlightCaptureByPosition(pos *Position) (*sitter.QueryCapture, error) {
+	point, err := doc.PositionToPoint(pos)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, cap := range doc.HighlightCaptures {
+		if NodeOverlapsRange(cap.Node, point, point) {
+			return cap, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (doc *TextDocument) GetClosestHighlightCaptureByPosition(pos *Position) (prev *sitter.QueryCapture, target *sitter.QueryCapture, next *sitter.QueryCapture, err error) {
+	point, err := doc.PositionToPoint(pos)
+
+	if err != nil {
+		return
+	}
+
+	for _, cap := range doc.HighlightCaptures {
+		switch CompareNodeWithRange(cap.Node, point, point) {
+		case -1:
+			prev = cap
+
+		case 2:
+			next = cap
+			return
+
+		default:
+			target = cap
+		}
+	}
+
+	return
+}
+
+func (doc *TextDocument) GetHighlightCapturesInNode(root *Node) []*sitter.QueryCapture {
+	qc := sitter.NewQueryCursor()
+	qc.Exec(doc.HighlightQuery, root)
+	defer qc.Close()
+
+	list := make([]*sitter.QueryCapture, 0)
+
+	for {
+		match, ok := qc.NextMatch()
+
+		if !ok {
+			break
+		}
+
+		for _, cap := range match.Captures {
+			list = append(list, &cap)
+		}
+	}
+
+	return list
 }
 
 func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
@@ -207,7 +329,7 @@ func (doc *TextDocument) PositionToByteIndex(pos *Position) (UInt, error) {
 		character++
 
 		if offset > max || (offset == max && character < pos.Character) {
-			return 0, fmt.Errorf("character %d is out of reange (%d) for line %d", pos.Character, character, pos.Line)
+			return 0, fmt.Errorf("character %d is out of range (%d) for line %d", pos.Character, character, pos.Line)
 		}
 	}
 
@@ -292,7 +414,7 @@ func (doc *TextDocument) LineByteIndexToPosition(line UInt, index UInt) (*Positi
 		column++
 
 		if offset > max {
-			return nil, fmt.Errorf("byte index %d is out of reange (%d) for line %d", index-doc.Lines[line], max-doc.Lines[line], line)
+			return nil, fmt.Errorf("byte index %d is out of range (%d) for line %d", index-doc.Lines[line], max-doc.Lines[line], line)
 		}
 	}
 
@@ -397,10 +519,10 @@ func (doc *TextDocument) GetNonSpaceTextAroundPosition(pos *Position) (string, e
 	return doc.Text[start:end], nil
 }
 
-func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*sitter.Node, error) {
+func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*Node, error) {
 	tree := doc.Tree
 	root := tree.RootNode()
-	targets := make([]*sitter.Node, 0)
+	targets := make([]*Node, 0)
 
 	startPoint, err := doc.PositionToPoint(start)
 
@@ -408,17 +530,16 @@ func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*sit
 		return nil, err
 	}
 
+	var endPoint *Point
+
 	if end == nil {
-		end = &Position{
-			Line:      start.Line,
-			Character: start.Character + 1,
+		endPoint = startPoint
+	} else {
+		endPoint, err = doc.PositionToPoint(end)
+
+		if err != nil {
+			return nil, err
 		}
-	}
-
-	endPoint, err := doc.PositionToPoint(end)
-
-	if err != nil {
-		return nil, err
 	}
 
 	if CompareNodeWithRange(root, startPoint, endPoint) == 0 {
@@ -428,7 +549,7 @@ func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*sit
 	c := sitter.NewTreeCursor(root)
 	defer c.Close()
 
-	VisitNode(c, func(node *sitter.Node) int8 {
+	VisitNode(c, func(node *Node) int8 {
 		switch CompareNodeWithRange(node, startPoint, endPoint) {
 		case -1:
 			return 1
@@ -453,7 +574,7 @@ func (doc *TextDocument) GetNodesByRange(start *Position, end *Position) ([]*sit
 	return targets, nil
 }
 
-func (doc *TextDocument) GetNodeByPosition(pos *Position) (*sitter.Node, error) {
+func (doc *TextDocument) GetNodeByPosition(pos *Position) (*Node, error) {
 	nodes, err := doc.GetNodesByRange(pos, nil)
 
 	if err != nil {
@@ -467,15 +588,80 @@ func (doc *TextDocument) GetNodeByPosition(pos *Position) (*sitter.Node, error) 
 	return nodes[0], nil
 }
 
+func (doc *TextDocument) GetClosestNodeByPosition(pos *Position) (*Node, error) {
+	point, err := doc.PositionToPoint(pos)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return doc.Tree.RootNode().NamedDescendantForPointRange(*point, *point), nil
+}
+
+func (doc *TextDocument) ConvertHighlightCaptures(legend HighlightLegend) ([]UInt, error) {
+	list := doc.HighlightCaptures
+	tokens := make([]UInt, len(list)*5)
+
+	var prev *Position
+
+	for i, cap := range list {
+		node := cap.Node
+		start, err := doc.PointToPosition(node.StartPoint())
+
+		if err != nil {
+			return nil, err
+		}
+
+		end, err := doc.PointToPosition(node.EndPoint())
+
+		if err != nil {
+			return nil, err
+		}
+
+		token := Token{
+			Position:  *start,
+			TokenType: legend[cap.Index],
+			Length:    UInt(end.Character - start.Character),
+		}
+
+		if prev != nil {
+			token.Line = token.Line - prev.Line
+
+			if token.Line == 0 {
+				token.Character = token.Character - prev.Character
+			}
+		}
+
+		prev = start
+
+		n := i * 5
+
+		tokens[n+0] = token.Line
+		tokens[n+1] = token.Character
+		tokens[n+2] = token.Length
+		tokens[n+3] = token.Type
+		tokens[n+4] = token.Modifiers
+	}
+
+	return tokens, nil
+}
+
 // Compare Node with points range
 //
 // -1 - node before range
 // 0 - node inside range
 // 1 - node overlaps range
 // 2 - node after range
-func CompareNodeWithRange(node *sitter.Node, rangeStart *sitter.Point, rangeEnd *sitter.Point) int8 {
+func CompareNodeWithRange(node *Node, rangeStart *Point, rangeEnd *Point) int8 {
 	start := node.StartPoint()
 	end := node.EndPoint()
+	zeroRange := rangeStart.Row == rangeEnd.Row && rangeStart.Column == rangeEnd.Column
+
+	if zeroRange &&
+		((start.Row == rangeStart.Row && start.Column == rangeStart.Column) ||
+			(end.Row == rangeEnd.Row && end.Column == rangeEnd.Column)) {
+		return 1
+	}
 
 	if end.Row < rangeStart.Row || (rangeStart.Row == end.Row && end.Column <= rangeStart.Column) {
 		return -1
@@ -493,9 +679,15 @@ func CompareNodeWithRange(node *sitter.Node, rangeStart *sitter.Point, rangeEnd 
 	return 1
 }
 
+func NodeOverlapsRange(node *Node, rangeStart *Point, rangeEnd *Point) bool {
+	res := CompareNodeWithRange(node, rangeStart, rangeEnd)
+
+	return res == 0 || res == 1
+}
+
 // Walk through Tree
 // compare function should return: -1 to stop walking, 0 for go inside, 1 to go to next sibling
-func VisitNode(cursor *sitter.TreeCursor, compare func(*sitter.Node) int8) {
+func VisitNode(cursor *sitter.TreeCursor, compare func(*Node) int8) {
 	for {
 		node := cursor.CurrentNode()
 		action := compare(node)
@@ -515,4 +707,15 @@ func VisitNode(cursor *sitter.TreeCursor, compare func(*sitter.Node) int8) {
 			break
 		}
 	}
+}
+
+func BitMask(indexes []UInt) UInt {
+	value := UInt(0)
+
+	for _, index := range indexes {
+		bit := math.Pow(2, float64(index))
+		value = value | UInt(bit)
+	}
+
+	return value
 }
