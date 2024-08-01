@@ -417,7 +417,10 @@ func TestHighlights(t *testing.T) {
 
 	pattern := "(identifier) @ident\n(number) @num"
 	q, _ := sitter.NewQuery([]byte(pattern), getLang())
-	doc.SetHighlightQuery(q)
+	doc.SetHighlightQuery(q, &textdocument.Ignore{
+		Missing: true,
+		Extra:   true,
+	})
 
 	if len(doc.HighlightCaptures) != 6 {
 		t.Errorf("init HighlightCaptures wrong len %d expect %d", len(doc.HighlightCaptures), 6)

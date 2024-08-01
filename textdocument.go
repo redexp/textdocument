@@ -29,6 +29,7 @@ type TextDocument struct {
 	Tree              *sitter.Tree
 	Parser            *sitter.Parser
 	HighlightQuery    *sitter.Query
+	HighlightIgnore   *Ignore
 	HighlightCaptures []*sitter.QueryCapture
 
 	lastLineOffset lineOffsetColumn
@@ -57,6 +58,14 @@ type lineOffsetColumn struct {
 	line   UInt
 	offset UInt
 	column UInt
+}
+
+type Ignore struct {
+	Missing bool
+	Extra   bool
+	Named   bool
+	Error   bool
+	Null    bool
 }
 
 type (
@@ -182,8 +191,9 @@ func (doc *TextDocument) SetParserCtx(parser *sitter.Parser, ctx *context.Contex
 	return doc.UpdateTree(ctx)
 }
 
-func (doc *TextDocument) SetHighlightQuery(query *sitter.Query) {
+func (doc *TextDocument) SetHighlightQuery(query *sitter.Query, ignore *Ignore) {
 	doc.HighlightQuery = query
+	doc.HighlightIgnore = ignore
 	doc.UpdateHighlightCaptures()
 }
 
@@ -296,6 +306,10 @@ func (doc *TextDocument) GetHighlightCapturesInNode(root *Node) []*sitter.QueryC
 		}
 
 		for _, cap := range match.Captures {
+			if shouldIgnore(doc.HighlightIgnore, cap.Node) {
+				continue
+			}
+
 			list = append(list, &cap)
 		}
 	}
@@ -718,4 +732,16 @@ func BitMask(indexes []UInt) UInt {
 	}
 
 	return value
+}
+
+func shouldIgnore(ignore *Ignore, node *Node) bool {
+	if ignore == nil {
+		return false
+	}
+
+	return (ignore.Missing && node.IsMissing()) ||
+		(ignore.Extra && node.IsExtra()) ||
+		(ignore.Error && node.IsError()) ||
+		(ignore.Null && node.IsNull()) ||
+		(ignore.Named && node.IsNamed())
 }
