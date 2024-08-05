@@ -461,6 +461,25 @@ func (doc *TextDocument) PositionToPoint(pos *Position) (*Point, error) {
 	}, nil
 }
 
+func (doc *TextDocument) NodeToRange(node *Node) (*proto.Range, error) {
+	start, err := doc.PointToPosition(node.StartPoint())
+
+	if err != nil {
+		return nil, err
+	}
+
+	end, err := doc.PointToPosition(node.EndPoint())
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &proto.Range{
+		Start: *start,
+		End:   *end,
+	}, nil
+}
+
 func (doc *TextDocument) LineMinMaxByteIndex(line UInt) (UInt, UInt, error) {
 	linesCount := UInt(len(doc.Lines))
 
