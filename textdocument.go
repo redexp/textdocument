@@ -23,14 +23,15 @@ func NewTextDocument(text string) *TextDocument {
 }
 
 type TextDocument struct {
-	Text              string
-	TextLength        UInt
-	Lines             []UInt
-	Tree              *sitter.Tree
-	Parser            *sitter.Parser
-	HighlightQuery    *sitter.Query
-	HighlightIgnore   *Ignore
-	HighlightCaptures []*sitter.QueryCapture
+	Text                   string
+	TextLength             UInt
+	Lines                  []UInt
+	Tree                   *sitter.Tree
+	Parser                 *sitter.Parser
+	HighlightQuery         *sitter.Query
+	HighlightIgnore        *Ignore
+	HighlightCaptures      []*sitter.QueryCapture
+	HighlightCapturesDirty bool
 
 	lastLineOffset lineOffsetColumn
 }
@@ -135,8 +136,6 @@ func (doc *TextDocument) ChangeCtx(e *ChangeEvent, ctx *context.Context) error {
 		return err
 	}
 
-	doc.UpdateHighlightCaptures()
-
 	return nil
 }
 
@@ -227,19 +226,23 @@ func (doc *TextDocument) UpdateTree(ctx *context.Context) error {
 	}
 
 	doc.Tree = tree
+	doc.HighlightCapturesDirty = true
 
 	return nil
 }
 
 func (doc *TextDocument) UpdateHighlightCaptures() {
-	if doc.Tree == nil || doc.HighlightQuery == nil {
+	if doc.Tree == nil || doc.HighlightQuery == nil || !doc.HighlightCapturesDirty {
 		return
 	}
 
 	doc.HighlightCaptures = doc.GetHighlightCapturesInNode(doc.Tree.RootNode())
+	doc.HighlightCapturesDirty = false
 }
 
 func (doc *TextDocument) GetHighlightCapturesByRange(start *Point, end *Point) []*sitter.QueryCapture {
+	doc.UpdateHighlightCaptures()
+
 	list := make([]*sitter.QueryCapture, 0)
 
 	for _, cap := range doc.HighlightCaptures {
@@ -258,6 +261,8 @@ func (doc *TextDocument) GetHighlightCaptureByPosition(pos *Position) (*sitter.Q
 		return nil, err
 	}
 
+	doc.UpdateHighlightCaptures()
+
 	for _, cap := range doc.HighlightCaptures {
 		if NodeOverlapsRange(cap.Node, point, point) {
 			return cap, nil
@@ -273,6 +278,8 @@ func (doc *TextDocument) GetClosestHighlightCaptureByPosition(pos *Position) (pr
 	if err != nil {
 		return
 	}
+
+	doc.UpdateHighlightCaptures()
 
 	for _, cap := range doc.HighlightCaptures {
 		switch CompareNodeWithRange(cap.Node, point, point) {
@@ -632,6 +639,8 @@ func (doc *TextDocument) GetClosestNodeByPosition(pos *Position) (*Node, error) 
 }
 
 func (doc *TextDocument) ConvertHighlightCaptures(legend HighlightLegend) ([]UInt, error) {
+	doc.UpdateHighlightCaptures()
+
 	list := doc.HighlightCaptures
 	tokens := make([]UInt, len(list)*5)
 
