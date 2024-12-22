@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/redexp/textdocument"
-	sitter "github.com/smacker/go-tree-sitter"
-	js "github.com/smacker/go-tree-sitter/javascript"
 	proto "github.com/tliron/glsp/protocol_3_16"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	js "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 )
 
 func getDoc() *textdocument.TextDocument {
@@ -20,7 +20,7 @@ func createParser() *sitter.Parser {
 }
 
 func getLang() *sitter.Language {
-	return js.GetLanguage()
+	return sitter.NewLanguage(js.Language())
 }
 
 func TestUpdateLines(t *testing.T) {
@@ -182,8 +182,8 @@ func TestPointToPosition(t *testing.T) {
 
 	for i, item := range list {
 		pos, err := doc.PointToPosition(textdocument.Point{
-			Row:    item[0],
-			Column: item[1],
+			Row:    uint(item[0]),
+			Column: uint(item[1]),
 		})
 
 		if err != nil {
@@ -308,115 +308,11 @@ func TestGetNonSpaceTextAroundPosition(t *testing.T) {
 	}
 }
 
-func TestGetNodesByRange(t *testing.T) {
-	text := "var x = 1\nvar y = 2\nvar z = 3"
-	doc := textdocument.NewTextDocument(text)
-	doc.SetParser(createParser())
-
-	list := []struct {
-		StartLine uint32
-		StartChar uint32
-		EndLine   uint32
-		EndChar   uint32
-		Values    []string
-	}{
-		{0, 4, 0, 9, []string{"x = 1"}},
-		{0, 1, 0, 5, []string{"var", "x"}},
-		{0, 8, 2, 1, []string{"1", "var y = 2", "var"}},
-		{1, 0, 1, 9, []string{"var y = 2"}},
-		{1, 0, 2, 0, []string{"var y = 2"}},
-		{2, 8, 2, 9, []string{"3"}},
-	}
-
-	for i, item := range list {
-		start := proto.Position{
-			Line:      item.StartLine,
-			Character: item.StartChar,
-		}
-		end := proto.Position{
-			Line:      item.EndLine,
-			Character: item.EndChar,
-		}
-		nodes, err := doc.GetNodesByRange(&start, &end)
-
-		if err != nil {
-			t.Errorf("%d err: %s", i, err)
-			continue
-		}
-
-		values := make([]string, len(nodes))
-
-		for i, node := range nodes {
-			values[i] = node.Content([]byte(text))
-		}
-
-		if len(values) != len(item.Values) {
-			t.Errorf("%d values: %v expect %v", i, values, item.Values)
-			continue
-		}
-
-		for j, value := range item.Values {
-			if values[j] != value {
-				t.Errorf("%d:%d value: '%s' expect '%s'", i, j, values[j], value)
-			}
-		}
-	}
-}
-
-func TestGetNodeByPosition(t *testing.T) {
-	text := "var x = 1\nvar y =  2\nvar z = 3"
-	doc := textdocument.NewTextDocument(text)
-	doc.SetParser(createParser())
-
-	list := []struct {
-		StartLine uint32
-		StartChar uint32
-		Value     string
-	}{
-		{0, 4, "x"},
-		{0, 1, "var"},
-		{0, 8, "1"},
-		{1, 0, "var"},
-		{1, 5, "y"},
-		{1, 8, ""},
-		{2, 9, "3"},
-	}
-
-	for i, item := range list {
-		start := proto.Position{
-			Line:      item.StartLine,
-			Character: item.StartChar,
-		}
-		node, err := doc.GetNodeByPosition(&start)
-
-		if err != nil {
-			t.Errorf("%d err: %s", i, err)
-			continue
-		}
-
-		if node == nil {
-			if item.Value == "" {
-				continue
-			}
-
-			t.Errorf("%d node nil, pos: %v", i, item)
-			continue
-		}
-
-		value := node.Content([]byte(text))
-
-		if item.Value != value {
-			t.Errorf("%d value: '%s' expect '%s'", i, value, item.Value)
-		}
-	}
-}
-
 func TestHighlights(t *testing.T) {
 	doc := textdocument.NewTextDocument("var x = 1\nvar y = 2\nvar zxc = 3")
 	doc.SetParser(createParser())
 
-	pattern := "(identifier) @ident\n(number) @num"
-	q, _ := sitter.NewQuery([]byte(pattern), getLang())
+	q, _ := sitter.NewQuery(getLang(), "(identifier) @ident\n(number) @num")
 	doc.SetHighlightQuery(q, &textdocument.Ignore{
 		Missing: true,
 		Extra:   true,
@@ -452,7 +348,7 @@ func TestHighlights(t *testing.T) {
 			t.Errorf("%d cap wrong Index %d expect %d", i, cap.Index, item.Index)
 		}
 
-		str := cap.Node.Content([]byte(doc.Text))
+		str := cap.Node.Utf8Text([]byte(doc.Text))
 
 		if str != item.Value {
 			t.Errorf("%d cap.Node.Content '%s' expect '%s'", i, str, item.Value)
@@ -500,7 +396,7 @@ func TestHighlights(t *testing.T) {
 				continue
 			}
 
-			value := cap.Node.Content([]byte(doc.Text))
+			value := cap.Node.Utf8Text([]byte(doc.Text))
 
 			if value != values[n] {
 				t.Errorf("%d cap %d is '%s' expect '%s'", i, n, value, values[n])
