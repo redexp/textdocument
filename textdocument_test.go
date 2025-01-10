@@ -482,3 +482,36 @@ func TestHighlights(t *testing.T) {
 		}
 	}
 }
+
+func TestGetTextOnLine(t *testing.T) {
+	doc := textdocument.NewTextDocument("asd\nwer zxc\ncvb ert")
+
+	type Test struct {
+		Line uint32
+		Text string
+	}
+
+	list := []Test{
+		{
+			Line: 0,
+			Text: "asd",
+		},
+		{
+			Line: 1,
+			Text: "wer zxc",
+		},
+	}
+
+	for i, item := range list {
+		text, err := doc.GetTextOnLine(item.Line)
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		if text != item.Text {
+			t.Errorf("%d wrong text '%s' expected '%s'", i, text, item.Text)
+		}
+	}
+}

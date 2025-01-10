@@ -493,6 +493,18 @@ func (doc *TextDocument) LineMinMaxByteIndex(line UInt) (UInt, UInt, error) {
 	return min, max, nil
 }
 
+func (doc *TextDocument) GetTextOnLine(line UInt) (text string, err error) {
+	min, max, err := doc.LineMinMaxByteIndex(line)
+
+	if err != nil {
+		return
+	}
+
+	text = doc.Text[min:max]
+
+	return
+}
+
 func (doc *TextDocument) GetNonSpaceTextAroundPosition(pos *Position) (string, error) {
 	end, err := doc.PositionToByteIndex(pos)
 
