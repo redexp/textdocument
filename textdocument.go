@@ -505,6 +505,26 @@ func (doc *TextDocument) GetTextOnLine(line UInt) (text string, err error) {
 	return
 }
 
+func (doc *TextDocument) GetTextByPosition(start *Position, end *Position) (text string, err error) {
+	s, err := doc.PositionToByteIndex(start)
+
+	if err != nil {
+		return
+	}
+
+	e, err := doc.PositionToByteIndex(end)
+
+	if err != nil {
+		return
+	}
+
+	return doc.Text[s:e], nil
+}
+
+func (doc *TextDocument) GetTextByRange(r *Range) (text string, err error) {
+	return doc.GetTextByPosition(&r.Start, &r.End)
+}
+
 func (doc *TextDocument) GetNonSpaceTextAroundPosition(pos *Position) (string, error) {
 	end, err := doc.PositionToByteIndex(pos)
 

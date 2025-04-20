@@ -1,16 +1,15 @@
-package textdocument_test
+package textdocument
 
 import (
 	"testing"
 
-	"github.com/redexp/textdocument"
 	proto "github.com/tliron/glsp/protocol_3_16"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	js "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 )
 
-func getDoc() *textdocument.TextDocument {
-	return textdocument.NewTextDocument("⌘sd\nqwer\n⌘xc") // 5 n 4 n 5 = 16
+func getDoc() *TextDocument {
+	return NewTextDocument("⌘sd\nqwer\n⌘xc") // 5 n 4 n 5 = 16
 }
 
 func createParser() *sitter.Parser {
@@ -48,27 +47,27 @@ func TestChange(t *testing.T) {
 		Check string
 	}{
 		{
-			Range: textdocument.NewRange(0, 0, 2, 1),
+			Range: NewRange(0, 0, 2, 1),
 			Check: "TESTxc",
 		},
 		{
-			Range: textdocument.NewRange(0, 0, 0, 1),
+			Range: NewRange(0, 0, 0, 1),
 			Check: "TESTsd\nqwer\n⌘xc",
 		},
 		{
-			Range: textdocument.NewRange(1, 1, 1, 1),
+			Range: NewRange(1, 1, 1, 1),
 			Check: "⌘sd\nqTESTwer\n⌘xc",
 		},
 		{
-			Range: textdocument.NewRange(0, 0, 1, 0),
+			Range: NewRange(0, 0, 1, 0),
 			Check: "TESTqwer\n⌘xc",
 		},
 		{
-			Range: textdocument.NewRange(0, 0, 2, 3),
+			Range: NewRange(0, 0, 2, 3),
 			Check: "TEST",
 		},
 		{
-			Range: textdocument.NewRange(2, 3, 2, 3),
+			Range: NewRange(2, 3, 2, 3),
 			Check: "⌘sd\nqwer\n⌘xcTEST",
 		},
 	}
@@ -181,7 +180,7 @@ func TestPointToPosition(t *testing.T) {
 	}
 
 	for i, item := range list {
-		pos, err := doc.PointToPosition(textdocument.Point{
+		pos, err := doc.PointToPosition(Point{
 			Row:    uint(item[0]),
 			Column: uint(item[1]),
 		})
@@ -240,7 +239,7 @@ func TestLineByteIndexToPosition(t *testing.T) {
 }
 
 func TestGetNonSpaceTextAroundPosition(t *testing.T) {
-	doc := textdocument.NewTextDocument("asd\nwer zxc")
+	doc := NewTextDocument("asd\nwer zxc")
 
 	type Test struct {
 		Line uint32
@@ -292,7 +291,7 @@ func TestGetNonSpaceTextAroundPosition(t *testing.T) {
 	}
 
 	for i, item := range list {
-		text, err := doc.GetNonSpaceTextAroundPosition(&textdocument.Position{
+		text, err := doc.GetNonSpaceTextAroundPosition(&Position{
 			Line:      item.Line,
 			Character: item.Char,
 		})
@@ -309,11 +308,11 @@ func TestGetNonSpaceTextAroundPosition(t *testing.T) {
 }
 
 func TestHighlights(t *testing.T) {
-	doc := textdocument.NewTextDocument("var x = 1\nvar y = 2\nvar zxc = 3")
+	doc := NewTextDocument("var x = 1\nvar y = 2\nvar zxc = 3")
 	doc.SetParser(createParser())
 
 	q, _ := sitter.NewQuery(getLang(), "(identifier) @ident\n(number) @num")
-	doc.SetHighlightQuery(q, &textdocument.Ignore{
+	doc.SetHighlightQuery(q, &Ignore{
 		Missing: true,
 		Extra:   true,
 	})
@@ -334,7 +333,7 @@ func TestHighlights(t *testing.T) {
 	}
 
 	for i, item := range capTests {
-		cap, err := doc.GetHighlightCaptureByPosition(&textdocument.Position{
+		cap, err := doc.GetHighlightCaptureByPosition(&Position{
 			Line:      item.Line,
 			Character: item.Char,
 		})
@@ -373,7 +372,7 @@ func TestHighlights(t *testing.T) {
 	}
 
 	for i, item := range closestTests {
-		prev, target, next, err := doc.GetClosestHighlightCaptureByPosition(&textdocument.Position{
+		prev, target, next, err := doc.GetClosestHighlightCaptureByPosition(&Position{
 			Line:      item.Line,
 			Character: item.Char,
 		})
@@ -426,7 +425,7 @@ func TestHighlights(t *testing.T) {
 			Character: item.Pos[3],
 		}
 
-		err := doc.Change(&textdocument.ChangeEvent{
+		err := doc.Change(&ChangeEvent{
 			Range: &proto.Range{
 				Start: *start,
 				End:   *end,
@@ -439,7 +438,7 @@ func TestHighlights(t *testing.T) {
 		}
 	}
 
-	legend := textdocument.HighlightLegend{
+	legend := HighlightLegend{
 		{
 			Type:      0,
 			Modifiers: 0,
@@ -484,7 +483,7 @@ func TestHighlights(t *testing.T) {
 }
 
 func TestGetTextOnLine(t *testing.T) {
-	doc := textdocument.NewTextDocument("asd\nwer zxc\ncvb ert")
+	doc := NewTextDocument("asd\nwer zxc\ncvb ert")
 
 	type Test struct {
 		Line uint32
@@ -504,6 +503,48 @@ func TestGetTextOnLine(t *testing.T) {
 
 	for i, item := range list {
 		text, err := doc.GetTextOnLine(item.Line)
+
+		if err != nil {
+			t.Errorf("%d err: %s", i, err)
+			continue
+		}
+
+		if text != item.Text {
+			t.Errorf("%d wrong text '%s' expected '%s'", i, text, item.Text)
+		}
+	}
+}
+
+func TestGetTextByPosition(t *testing.T) {
+	doc := NewTextDocument("asd\nwer zxc\ncvb ert")
+
+	type Test struct {
+		Start *Position
+		End   *Position
+
+		Text string
+	}
+
+	list := []Test{
+		{
+			Start: &Position{0, 0},
+			End:   &Position{0, 2},
+			Text:  "as",
+		},
+		{
+			Start: &Position{0, 1},
+			End:   &Position{1, 2},
+			Text:  "sd\nwe",
+		},
+		{
+			Start: &Position{1, 0},
+			End:   &Position{2, 1},
+			Text:  "wer zxc\nc",
+		},
+	}
+
+	for i, item := range list {
+		text, err := doc.GetTextByPosition(item.Start, item.End)
 
 		if err != nil {
 			t.Errorf("%d err: %s", i, err)
